@@ -17,8 +17,8 @@ It handles the full authentication lifecycle: registration, email verification,
 login, session management, password reset, and protected routing.
 
 There is no separate backend service. All API logic lives inside Next.js
-API routes and server actions. The database is PostgreSQL, accessed exclusively
-through Prisma ORM. Email delivery is handled by Resend.
+API routes. The database is PostgreSQL, accessed exclusively through Prisma ORM.
+Email delivery is handled by Resend.
 
 ```
 Browser
@@ -27,15 +27,15 @@ Browser
 Next.js 14 (App Router)
   ├── Pages (RSC + Client Components)
   ├── API Routes (/app/api/*)
-  ├── Middleware (route protection + rate limiting)
+  ├── Middleware (route protection only)
   │
   ▼
 Business Logic Layer (/lib/*)
-  ├── NextAuth.js (session management)
+  ├── NextAuth.js (session management, login rate limiting)
   ├── bcryptjs (password hashing)
   ├── Zod (input validation)
   ├── Resend (email delivery)
-  └── Rate Limiter (Upstash or custom)
+  └── Rate Limiter (Upstash or in-memory fallback)
   │
   ▼
 Prisma ORM
@@ -79,6 +79,7 @@ All server-side operations are exposed as Next.js Route Handlers.
 ```
 /app/api
   /auth/[...nextauth]/route.ts    — NextAuth catch-all handler
+  /auth/signup/route.ts           — Creates user, issues verification token, sends email
   /auth/verify/route.ts           — Handles email verification token
   /auth/forgot-password/route.ts  — Sends reset email
   /auth/reset-password/route.ts   — Validates token, updates password
@@ -93,11 +94,11 @@ All server-side operations are exposed as Next.js Route Handlers.
 
 ### 3. Middleware Layer — `/middleware.ts`
 
-Middleware runs on every request before it reaches a page or API route.
-It handles two concerns:
+Middleware runs on matched routes before they reach a page. It handles **route
+protection only** (not rate limiting).
 
 **Route Protection**
-Checks the NextAuth session on every request to protected routes.
+Checks the NextAuth JWT session on protected routes.
 
 ```
 Request to /dashboard/*
@@ -105,19 +106,25 @@ Request to /dashboard/*
   ├── No session → redirect to /auth/login
   ├── Session exists, emailVerified: false → redirect to /auth/verify-email
   └── Session exists, emailVerified: true → allow through
+
+Request to /auth/login or /auth/signup
+  │
+  └── Session exists, emailVerified: true → redirect to /dashboard
 ```
 
-**Rate Limiting**
-Applied specifically to the login endpoint to prevent brute-force attacks.
+**Rate Limiting (login only)**
+Applied in `lib/auth.ts` inside the CredentialsProvider `authorize` callback,
+not in middleware. When over limit, `authorize` returns `null` and NextAuth
+surfaces a generic sign-in failure.
 
 ```
 POST /api/auth/[...nextauth] (credentials login)
   │
-  ├── Under limit → allow request
-  └── Over limit → return 429, generic message
+  ├── Under limit → continue credential check
+  └── Over limit → authorize returns null (generic failure)
 ```
 
-**Rule:** Middleware is the first and primary line of defence for route protection.
+**Rule:** Middleware is the first line of defence for `/dashboard` access.
 Do not rely solely on client-side redirects.
 
 ---
@@ -128,14 +135,15 @@ All shared logic, clients, and utilities live here.
 
 | File | Responsibility |
 |---|---|
-| `auth.ts` | NextAuth configuration: providers, callbacks, Prisma adapter |
+| `auth.ts` | NextAuth configuration: CredentialsProvider, JWT callbacks, login rate limiting |
 | `db.ts` | Prisma client singleton — prevents connection pool exhaustion in dev |
-| `email.ts` | Resend client initialisation and send helper functions |
-| `rate-limit.ts` | Rate limiter setup (Upstash or in-memory fallback) |
+| `email.ts` | Resend client, inline HTML email helpers for verification and reset |
+| `env.ts` | Validated environment variables (throws at startup if missing) |
+| `rate-limit.ts` | Rate limiter (Upstash Redis when configured, in-memory fallback) |
 | `validations.ts` | All Zod schemas for every form and API input |
 
-**Rule:** No page or API route imports Prisma directly.
-All database access goes through functions defined in `/lib`.
+**Rule:** Pages must not import `@prisma/client` directly. API routes and
+`lib/auth.ts` access the database via the `db` singleton from `lib/db.ts`.
 
 ---
 
@@ -143,14 +151,14 @@ All database access goes through functions defined in `/lib`.
 
 ```
 /components
-  /ui        — Primitive components: Button, Input, Alert, Badge
+  /ui        — Primitive components: Button, Input, Alert, Badge, PasswordStrength
   /forms     — Feature-specific form components per auth screen
-  /email     — React Email templates for verification and reset emails
 ```
 
 **Rule:** UI components in `/ui` are stateless and reusable.
 Form components in `/forms` own their local state and validation display.
-Email templates in `/email` are React components rendered server-side by Resend.
+Email bodies are built as inline HTML in `lib/email.ts` and sent via Resend
+(not separate React Email template files).
 
 ---
 
@@ -165,7 +173,7 @@ User
   ├── id (cuid)
   ├── email (unique)
   ├── password (hashed)
-  ├── emailVerified (boolean)
+  ├── emailVerified (DateTime? — null = unverified, set on verification)
   ├── createdAt
   ├── updatedAt
   └── tokens → Token[]
@@ -178,14 +186,14 @@ Token
   ├── userId → User
   └── createdAt
 
-(NextAuth session tables managed by Prisma adapter)
+Account, Session, VerificationToken — NextAuth Prisma adapter tables
 ```
 
 **Token lifecycle:**
 1. Token is generated with `crypto.randomBytes(32).toString('hex')`
 2. Token is stored in the database with an expiry 1 hour from creation
 3. On use: expiry is checked, token is validated, action is performed
-4. Used or expired tokens are deleted or invalidated immediately
+4. Used or expired tokens are deleted immediately (single-use)
 
 ---
 
@@ -194,7 +202,7 @@ Token
 ### Sign Up Flow
 
 ```
-User submits sign up form
+User submits sign up form → POST /api/auth/signup
   │
   ▼
 Zod validates input (email, password strength)
@@ -204,22 +212,22 @@ Zod validates input (email, password strength)
   ▼
 Check if email already exists in DB
   │
-  ├── Exists → return 400, generic message
+  ├── Exists → return 400, generic message (same shape as other client errors)
   │
   ▼
 Hash password with bcryptjs (salt rounds: 12)
   │
   ▼
-Create User record (emailVerified: false)
+Create User record (emailVerified: null)
   │
   ▼
-Generate EMAIL_VERIFICATION token → store in DB
+Generate EMAIL_VERIFICATION token → store in DB (1 hour expiry)
   │
   ▼
 Send verification email via Resend
   │
   ▼
-Return success → redirect user to verification notice
+Return 201 success → client shows verification notice
 ```
 
 ---
@@ -227,38 +235,35 @@ Return success → redirect user to verification notice
 ### Login Flow
 
 ```
-User submits login form
+User submits login form → NextAuth credentials sign-in
   │
   ▼
-Rate limiter checks request (by IP)
+Rate limiter checks IP in authorize() (lib/auth.ts)
   │
-  ├── Over limit → return 429, generic message
-  │
-  ▼
-NextAuth CredentialsProvider receives email + password
+  ├── Over limit → authorize returns null → generic sign-in failure
   │
   ▼
 Zod validates input
   │
-  ├── Invalid → return 401, generic message
+  ├── Invalid → authorize returns null → generic sign-in failure
   │
   ▼
 Look up user by email
   │
-  ├── Not found → return 401, "Invalid credentials"
+  ├── Not found → authorize returns null → generic sign-in failure
   │
   ▼
 bcryptjs.compare(inputPassword, storedHash)
   │
-  ├── No match → return 401, "Invalid credentials"
+  ├── No match → authorize returns null → generic sign-in failure
   │
   ▼
-Check emailVerified === true
+Check user.emailVerified is set (DateTime)
   │
-  ├── false → return 401, "Please verify your email"
+  ├── null → authorize returns null → generic sign-in failure (no distinct message)
   │
   ▼
-NextAuth creates session → sets HttpOnly cookie
+NextAuth issues JWT → sets HttpOnly session cookie
   │
   ▼
 Redirect to /dashboard
@@ -270,29 +275,32 @@ Redirect to /dashboard
 
 ```
 User clicks link in verification email
-  ├── Link contains: /auth/verify-email?token=<token>
+  ├── Link: /auth/verify-email?token=<token> (email deep link only)
   │
   ▼
-API route receives token
+verify-email-client reads token, router.replace() strips query from URL
+  │
+  ▼
+POST /api/auth/verify with { token } in JSON body (not in URL)
   │
   ▼
 Look up token in DB where type = EMAIL_VERIFICATION
   │
-  ├── Not found → return error, prompt to re-request
+  ├── Not found → 400, prompt to re-request
   │
   ▼
 Check token.expiresAt > now
   │
-  ├── Expired → delete token, return error, prompt to re-request
+  ├── Expired → delete token, 400, prompt to re-request
   │
   ▼
-Set user.emailVerified = true
+Set user.emailVerified = new Date()
   │
   ▼
 Delete token from DB
   │
   ▼
-Redirect to /auth/login with success message
+Client shows success on /auth/verify-email (user signs in separately)
 ```
 
 ---
@@ -300,7 +308,7 @@ Redirect to /auth/login with success message
 ### Forgot Password Flow
 
 ```
-User submits email on forgot password page
+User submits email on forgot password page → POST /api/auth/forgot-password
   │
   ▼
 Look up user by email
@@ -319,19 +327,18 @@ Send reset email via Resend
   ▼
 Return success message regardless of outcome
 
-User clicks reset link
-  ├── Link contains: /auth/reset-password?token=<token>
+User opens reset link: /auth/reset-password?token=<token>
+  │
+  ▼
+Form reads token from query once, submits via POST /api/auth/reset-password
+  with { token, password } in JSON body
+  │
+  ├── Missing token in URL → show invalid link error (no API call)
   │
   ▼
 Validate token (exists, not expired, type = PASSWORD_RESET)
   │
-  ├── Invalid or expired → return error, prompt to re-request
-  │
-  ▼
-User submits new password
-  │
-  ▼
-Zod validates new password (strength requirements)
+  ├── Invalid or expired → 400, prompt to re-request
   │
   ▼
 Hash new password with bcryptjs
@@ -340,24 +347,27 @@ Hash new password with bcryptjs
 Update user.password in DB
   │
   ▼
-Delete token from DB
+Delete token from DB (consumes token — no reuse)
   │
   ▼
-Redirect to /auth/login with success message
+Client redirects to /auth/login
 ```
 
 ---
 
 ## Session Architecture
 
-NextAuth manages sessions using the Prisma adapter with a database strategy.
+NextAuth uses **JWT session strategy** (`session.strategy: "jwt"` in `lib/auth.ts`).
+The Prisma adapter is configured for schema compatibility; session rows are not
+used for the credentials-only flow.
 
-- Sessions are stored in the database, not in JWTs by default
-- Session token is stored in an HttpOnly, Secure cookie on the client
-- The session record links to the User record in the database
-- On logout: `signOut()` destroys the session record in the database and clears the cookie
-- Session data available in server components via `getServerSession(authOptions)`
-- Session data available in client components via `useSession()` hook
+- Session payload is encoded in a signed JWT
+- JWT is stored in an HttpOnly, Secure, SameSite cookie via NextAuth
+- `jwt` and `session` callbacks copy `id` and `emailVerified` (boolean) into the session
+- Middleware and UI read `emailVerified` as a boolean on the session token
+- Database `User.emailVerified` is `DateTime?`; null means unverified
+- On logout: `signOut()` clears the session cookie; JWT cannot be server-revoked before expiry without extra infrastructure
+- Server: `getServerSession(authOptions)`; client: `useSession()`
 
 ---
 
@@ -368,11 +378,17 @@ NextAuth manages sessions using the Prisma adapter with a database strategy.
 | Password storage | bcryptjs, salt rounds: 12 |
 | Token generation | `crypto.randomBytes(32).toString('hex')` |
 | Token expiry | 1 hour for all token types |
+| Token reuse | Deleted from DB on successful verify or reset |
 | Session cookies | HttpOnly, Secure, SameSite via NextAuth |
-| CSRF protection | Enabled by default in NextAuth — not disabled |
-| Brute force | Rate limiting on login endpoint via Upstash or middleware |
+| CSRF protection | Enabled by default on NextAuth routes — do not disable |
+| Custom API routes | JSON POST bodies; tokens sent in body after page load where possible |
+| Tokens in URLs | Email links use `?token=` for one-time navigation; verify flow strips query immediately; prefer POST body for API calls |
+| Brute force | Rate limiting on login only (`authorize` in `lib/auth.ts`), 5 attempts / 10 min per IP |
+| Rate limit backend | Upstash Redis when env vars set; in-memory fallback per instance in dev |
+| Upstash outage | If Redis client throws, logs server-side and allows the request (`success: true`); without Upstash env vars, uses in-memory limiter per instance |
 | Error leakage | Generic messages on all auth errors — no internal details exposed |
 | Email enumeration | Forgot password returns same response whether email exists or not |
+| Env secrets | Validated at startup via `lib/env.ts` — missing vars throw, no silent failure |
 
 ---
 
@@ -392,7 +408,7 @@ PostgreSQL (Vercel Postgres or Railway)
   │
   ▼
 Resend (transactional email)
-Upstash (Redis — rate limiting)
+Upstash (Redis — rate limiting, optional)
 ```
 
 **Environment separation:**
@@ -407,19 +423,20 @@ Upstash (Redis — rate limiting)
 App Router enables React Server Components, which reduce client bundle size
 and allow direct database access in server components without an extra API call.
 
-**Why database sessions instead of JWT?**
-Database sessions allow immediate session invalidation on logout or account
-compromise. JWTs cannot be revoked before expiry without additional infrastructure.
+**Why JWT sessions instead of database sessions?**
+CredentialsProvider with JWT keeps session handling simple for this demo app.
+The tradeoff is that sessions cannot be centrally revoked before JWT expiry without
+a denylist or shorter maxAge. Database session tables remain in the schema via
+the Prisma adapter for consistency with NextAuth conventions.
 
 **Why a single Token model for both verification and reset?**
 Consolidating token types into one model with a `TokenType` enum keeps the
 schema simple, reduces join complexity, and makes token lifecycle management
 (expiry checks, deletion) consistent across both flows.
 
-**Why Resend + React Email instead of Nodemailer?**
-Resend has a reliable delivery infrastructure and React Email allows email
-templates to be written and previewed as React components — consistent with
-the rest of the codebase and easier to maintain.
+**Why inline HTML in `lib/email.ts` instead of separate template files?**
+Keeps the email surface small for a demo IAM app: one place to edit copy and
+links without a separate React Email build step.
 
 **Why Zod on the server only?**
 Client-side validation improves UX but is never a security boundary.

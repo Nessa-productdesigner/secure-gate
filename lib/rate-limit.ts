@@ -24,7 +24,8 @@ export async function rateLimit(identifier: string): Promise<{
         success: result.success,
         remaining: result.remaining,
       };
-    } catch {
+    } catch (e) {
+      console.error("[rate-limit] Upstash Redis error, falling back to in-memory:", e);
       return { success: true, remaining: LIMIT };
     }
   }

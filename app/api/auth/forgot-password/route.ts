@@ -39,8 +39,8 @@ export async function POST(req: NextRequest) {
 
       try {
         await sendPasswordResetEmail(email, token);
-      } catch {
-        // Email failure should not reveal user existence
+      } catch (e) {
+        console.error("[forgot-password] Failed to send reset email:", e);
       }
     }
 

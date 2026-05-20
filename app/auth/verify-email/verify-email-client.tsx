@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
@@ -8,15 +8,21 @@ import { Alert } from "@/components/ui/alert";
 export function VerifyEmailClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const token = searchParams.get("token");
-  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">(token ? "loading" : "idle");
+  const rawToken = searchParams.get("token");
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">(rawToken ? "loading" : "idle");
   const [message, setMessage] = useState("");
 
-  if (token && status === "loading") {
+  useEffect(() => {
+    if (!rawToken) return;
+
+    router.replace("/auth/verify-email");
+
+    setStatus("loading");
+
     fetch("/api/auth/verify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
+      body: JSON.stringify({ token: rawToken }),
     })
       .then((res) => res.json())
       .then((data) => {
@@ -32,7 +38,7 @@ export function VerifyEmailClient() {
         setStatus("error");
         setMessage("Something went wrong");
       });
-  }
+  }, [rawToken, router]);
 
   return (
     <>

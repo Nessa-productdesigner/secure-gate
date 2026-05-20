@@ -49,8 +49,8 @@ export async function POST(req: NextRequest) {
 
     try {
       await sendVerificationEmail(email, token);
-    } catch {
-      // Email failure should not block signup
+    } catch (e) {
+      console.error("[signup] Failed to send verification email:", e);
     }
 
     return NextResponse.json(

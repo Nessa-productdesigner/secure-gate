@@ -4,9 +4,10 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import bcrypt from "bcryptjs";
 import { db } from "./db";
 import { loginSchema } from "./validations";
+import { rateLimit } from "./rate-limit";
 
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(db) as NextAuthOptions["adapter"],
+  adapter: PrismaAdapter(db),
   session: {
     strategy: "jwt",
   },
@@ -21,11 +22,19 @@ export const authOptions: NextAuthOptions = {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         const parsed = loginSchema.safeParse(credentials);
         if (!parsed.success) return null;
 
         const { email, password } = parsed.data;
+
+        const ip =
+          req?.headers?.["x-forwarded-for"]?.toString().split(",")[0]?.trim() ??
+          req?.headers?.["x-real-ip"]?.toString() ??
+          "unknown";
+
+        const { success: withinLimit } = await rateLimit(`login:${ip}`);
+        if (!withinLimit) return null;
 
         const user = await db.user.findUnique({ where: { email } });
         if (!user) return null;
