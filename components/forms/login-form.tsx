@@ -18,30 +18,36 @@ export function LoginForm() {
     setIsLoading(true);
     setError("");
 
-    const result = await signIn("credentials", {
-      email: fields.email,
-      password: fields.password,
-      redirect: false,
-    });
+    try {
+      const result = await signIn("credentials", {
+        email: fields.email.trim().toLowerCase(),
+        password: fields.password,
+        redirect: false,
+      });
 
-    setIsLoading(false);
+      if (result?.error) {
+        setError("Invalid credentials");
+        return;
+      }
 
-    if (result?.error) {
-      setError("Invalid credentials");
-      return;
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      setError("Unable to sign in. Please check your connection and try again.");
+    } finally {
+      setIsLoading(false);
     }
-
-    router.push("/dashboard");
-    router.refresh();
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
       {error && <Alert type="error" message={error} />}
 
       <Input
         label="Email"
         type="email"
+        name="email"
+        autoComplete="email"
         placeholder="you@example.com"
         value={fields.email}
         onChange={(e) => setFields({ ...fields, email: e.target.value })}
@@ -51,6 +57,8 @@ export function LoginForm() {
       <Input
         label="Password"
         type="password"
+        name="password"
+        autoComplete="current-password"
         placeholder="Enter your password"
         value={fields.password}
         onChange={(e) => setFields({ ...fields, password: e.target.value })}

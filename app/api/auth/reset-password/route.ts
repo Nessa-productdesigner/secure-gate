@@ -2,9 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { resetPasswordSchema } from "@/lib/validations";
+import { enforceRateLimit } from "@/lib/api-rate-limit";
+import { BCRYPT_ROUNDS } from "@/lib/constants";
 
 export async function POST(req: NextRequest) {
   try {
+    const rateLimited = await enforceRateLimit(req, "reset-password");
+    if (rateLimited) return rateLimited;
+
     const body = await req.json();
     const parsed = resetPasswordSchema.safeParse(body);
 
@@ -39,7 +44,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const hashedPassword = await bcrypt.hash(password, 12);
+    const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
     await db.user.update({
       where: { id: existingToken.userId },

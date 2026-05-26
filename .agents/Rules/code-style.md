@@ -54,8 +54,7 @@ git commit -m "chore: initial securegate scaffold"
 
 # Project Structure Standards
 
-Current layout (do not add dynamic `[token]` page segments; tokens use query params
-on auth pages and JSON bodies on API routes):
+Current layout (tokens in email link **paths**; API routes accept JSON bodies):
 
 ```txt
 /app
@@ -63,14 +62,17 @@ on auth pages and JSON bodies on API routes):
     /login/page.tsx
     /signup/page.tsx
     /forgot-password/page.tsx
-    /reset-password/page.tsx      — reads ?token= from email link
-    /verify-email/page.tsx        — client strips ?token= after load
+    /reset-password/page.tsx           — legacy ?token= redirect only
+    /reset-password/[token]/page.tsx   — reset form
+    /verify-email/page.tsx
+    /verify-email/confirm/[token]/     — consumes verify token
   /dashboard/page.tsx
   /api/auth
     signup/route.ts
     verify/route.ts
     forgot-password/route.ts
     reset-password/route.ts
+    resend-verification/route.ts
     [...nextauth]/route.ts
 
 /components
@@ -248,11 +250,12 @@ Protected routes must never rely solely on client-side checks.
 
 ## Tokens in URLs
 
-Email links may use `?token=` for one-time navigation. Mitigations:
+Email links use path segments:
 
-- Verification: client calls `router.replace()` to strip the query, then `POST`s token in JSON body
-- Reset: token read from query once, submitted in `POST` body to `/api/auth/reset-password`
-- Prefer tokens in request bodies for API calls; avoid logging query strings
+- `/auth/verify-email/confirm/[token]` → `POST /api/auth/verify` with `{ token }`
+- `/auth/reset-password/[token]` → form submits `POST /api/auth/reset-password`
+
+Legacy `?token=` links redirect to the path-based confirm route. Do not add new query-token flows.
 
 ---
 

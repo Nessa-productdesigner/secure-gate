@@ -156,22 +156,13 @@ Rules:
 
 ---
 
-## Email Components
+## Email (not a components folder)
 
-Location:
-```txt
-/components/email
-```
-
-Examples:
-```txt
-verify-email-template.tsx
-reset-password-template.tsx
-```
+Transactional email HTML lives in `lib/email.ts` (Resend). Do not add `/components/email`.
 
 Rules:
-- simple structure
-- email-client safe
+- simple HTML, email-client safe
+- links use path-based tokens (`/auth/verify-email/confirm/[token]`, `/auth/reset-password/[token]`)
 - minimal styling complexity
 
 ---

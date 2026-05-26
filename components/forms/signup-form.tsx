@@ -20,43 +20,55 @@ export function SignupForm() {
     setError("");
     setFieldErrors({});
 
-    const res = await fetch("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(fields),
-    });
+    const email = fields.email.trim().toLowerCase();
 
-    const data = await res.json();
-    setIsLoading(false);
+    try {
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password: fields.password }),
+      });
 
-    if (!res.ok) {
-      if (data.field) {
-        setFieldErrors({ [data.field]: data.error });
-      } else {
-        setError(data.error);
+      const data = await res.json();
+
+      if (res.status === 429) {
+        setError("Too many attempts. Please wait a few minutes and try again.");
+        return;
       }
-      return;
-    }
 
-    if (data.emailSent === false) {
-      setError(
-        "Account created, but we could not send the verification email. Add a real Resend API key in .env.local, restart the app, and sign up again—or ask your developer to resend."
-      );
-      return;
-    }
+      if (!res.ok) {
+        if (data.field) {
+          setFieldErrors({ [data.field]: data.error });
+        } else {
+          setError(data.error ?? "Unable to create your account. Please try again.");
+        }
+        return;
+      }
 
-    router.push(
-      `/auth/verify-email?email=${encodeURIComponent(fields.email)}`
-    );
+      if (data.emailSent === false) {
+        router.push(
+          `/auth/verify-email?email=${encodeURIComponent(email)}&emailPending=1`
+        );
+        return;
+      }
+
+      router.push(`/auth/verify-email?email=${encodeURIComponent(email)}`);
+    } catch {
+      setError("Unable to connect. Please check your network and try again.");
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
       {error && <Alert type="error" message={error} />}
 
       <Input
         label="Email"
         type="email"
+        name="email"
+        autoComplete="email"
         placeholder="you@example.com"
         value={fields.email}
         onChange={(e) => setFields({ ...fields, email: e.target.value })}
@@ -68,6 +80,8 @@ export function SignupForm() {
         <Input
           label="Password"
           type="password"
+          name="password"
+          autoComplete="new-password"
           placeholder="Create a strong password"
           value={fields.password}
           onChange={(e) => setFields({ ...fields, password: e.target.value })}

@@ -3,46 +3,32 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Alert } from "@/components/ui/alert";
+
+const ERROR_MESSAGES: Record<string, string> = {
+  invalid: "Invalid or expired verification link. Request a new email below.",
+  error: "We could not verify your email. Please try again or request a new link.",
+};
 
 export function VerifyEmailClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const rawToken = searchParams.get("token");
+  const legacyToken = searchParams.get("token");
+  const verified = searchParams.get("verified") === "1";
+  const errorCode = searchParams.get("error");
+  const emailPending = searchParams.get("emailPending") === "1";
+
   const emailFromQuery = searchParams.get("email") ?? "";
-  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">(rawToken ? "loading" : "idle");
-  const [message, setMessage] = useState("");
   const [resendEmail, setResendEmail] = useState(emailFromQuery);
   const [resendLoading, setResendLoading] = useState(false);
   const [resendMessage, setResendMessage] = useState("");
 
   useEffect(() => {
-    if (!rawToken) return;
-
-    router.replace("/auth/verify-email");
-
-    setStatus("loading");
-
-    fetch("/api/auth/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: rawToken }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) {
-          setStatus("success");
-          setMessage("Email verified successfully!");
-        } else {
-          setStatus("error");
-          setMessage(data.error);
-        }
-      })
-      .catch(() => {
-        setStatus("error");
-        setMessage("Something went wrong");
-      });
-  }, [rawToken, router]);
+    if (legacyToken) {
+      router.replace(`/auth/verify-email/confirm/${legacyToken}`);
+    }
+  }, [legacyToken, router]);
 
   async function handleResend() {
     setResendLoading(true);
@@ -58,71 +44,95 @@ export function VerifyEmailClient() {
     setResendLoading(false);
 
     if (!res.ok) {
-      setResendMessage(data.error ?? "Could not resend email.");
+      setResendMessage(data.error ?? "Could not resend email. Please try again later.");
       return;
     }
 
-    setResendMessage(data.message ?? "Verification email sent. Check your inbox and spam folder.");
+    setResendMessage(
+      data.message ?? "If an unverified account exists, a new verification link has been sent."
+    );
+  }
+
+  if (legacyToken) {
+    return (
+      <div className="flex flex-col items-center gap-3">
+        <div className="animate-spin h-8 w-8 border-2 border-brand-primary border-t-transparent rounded-full" />
+        <p className="text-muted">Redirecting to verification...</p>
+      </div>
+    );
+  }
+
+  if (verified) {
+    return (
+      <div className="flex flex-col gap-4">
+        <Alert type="success" message="Email verified successfully!" />
+        <p className="text-muted text-sm">You can now sign in with your password.</p>
+        <Button onClick={() => router.push("/auth/login")}>Go to Login</Button>
+      </div>
+    );
+  }
+
+  if (errorCode) {
+    return (
+      <div className="flex flex-col gap-4">
+        <Alert
+          type="error"
+          message={ERROR_MESSAGES[errorCode] ?? ERROR_MESSAGES.error}
+        />
+        <Input
+          label="Email"
+          type="email"
+          placeholder="you@example.com"
+          value={resendEmail}
+          onChange={(e) => setResendEmail(e.target.value)}
+        />
+        <Button type="button" onClick={handleResend} isLoading={resendLoading}>
+          Resend verification email
+        </Button>
+        {resendMessage && (
+          <p className="text-sm text-muted" role="status">
+            {resendMessage}
+          </p>
+        )}
+        <Button variant="secondary" onClick={() => router.push("/auth/login")}>
+          Go to Login
+        </Button>
+      </div>
+    );
   }
 
   return (
-    <>
-      {status === "idle" && (
-        <div className="flex flex-col gap-4">
-          <Alert type="warning" message="Please check your email for a verification link." />
-          <p className="text-[#9CA3AF] text-sm">
-            A verification email has been sent to your inbox. Click the link to verify your account.
-            Check spam if you do not see it.
+    <div className="flex flex-col gap-4">
+      {emailPending && (
+        <Alert
+          type="warning"
+          message="Your account was created, but the verification email could not be sent. Use Resend below."
+        />
+      )}
+      <Alert type="warning" message="Please check your email for a verification link." />
+      <p className="text-muted text-sm">
+        A verification email has been sent to your inbox. Click the link to verify your account.
+        Check spam if you do not see it.
+      </p>
+      <div className="flex flex-col gap-2 border-t border-default pt-4">
+        <p className="text-muted text-sm">Did not get the email?</p>
+        <Input
+          label="Email"
+          type="email"
+          placeholder="you@example.com"
+          value={resendEmail}
+          onChange={(e) => setResendEmail(e.target.value)}
+        />
+        <Button type="button" onClick={handleResend} isLoading={resendLoading}>
+          Resend verification email
+        </Button>
+        {resendMessage && (
+          <p className="text-sm text-muted" role="status">
+            {resendMessage}
           </p>
-          <div className="flex flex-col gap-2 border-t border-[#1F2937] pt-4">
-            <p className="text-[#9CA3AF] text-sm">Did not get the email?</p>
-            <input
-              type="email"
-              value={resendEmail}
-              onChange={(e) => setResendEmail(e.target.value)}
-              placeholder="you@example.com"
-              className="h-10 px-3 rounded-lg border border-[#1F2937] bg-[#111827] text-[#F9FAFB] text-sm"
-              aria-label="Email address"
-            />
-            <Button type="button" onClick={handleResend} isLoading={resendLoading}>
-              Resend verification email
-            </Button>
-            {resendMessage && (
-              <p className="text-sm text-[#9CA3AF]" role="status">
-                {resendMessage}
-              </p>
-            )}
-          </div>
-          <Button onClick={() => router.push("/auth/login")}>
-            Go to Login
-          </Button>
-        </div>
-      )}
-
-      {status === "loading" && (
-        <div className="flex flex-col items-center gap-3">
-          <div className="animate-spin h-8 w-8 border-2 border-[#2563EB] border-t-transparent rounded-full" />
-          <p className="text-[#9CA3AF]">Verifying your email...</p>
-        </div>
-      )}
-
-      {status === "success" && (
-        <div className="flex flex-col gap-4">
-          <Alert type="success" message={message} />
-          <Button onClick={() => router.push("/auth/login")}>
-            Go to Login
-          </Button>
-        </div>
-      )}
-
-      {status === "error" && (
-        <div className="flex flex-col gap-4">
-          <Alert type="error" message={message} />
-          <Button onClick={() => router.push("/auth/verify-email")}>
-            Back to verification help
-          </Button>
-        </div>
-      )}
-    </>
+        )}
+      </div>
+      <Button onClick={() => router.push("/auth/login")}>Go to Login</Button>
+    </div>
   );
 }

@@ -14,6 +14,7 @@ export function Alert({ type, message }: AlertProps) {
     <div
       className={`p-3 rounded-lg border text-sm ${styles[type]}`}
       role="alert"
+      aria-live="polite"
     >
       {message}
     </div>

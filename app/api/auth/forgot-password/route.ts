@@ -3,9 +3,14 @@ import crypto from "crypto";
 import { db } from "@/lib/db";
 import { forgotPasswordSchema } from "@/lib/validations";
 import { sendPasswordResetEmail } from "@/lib/email";
+import { enforceRateLimit } from "@/lib/api-rate-limit";
+import { TOKEN_EXPIRY_MS } from "@/lib/constants";
 
 export async function POST(req: NextRequest) {
   try {
+    const rateLimited = await enforceRateLimit(req, "forgot-password");
+    if (rateLimited) return rateLimited;
+
     const body = await req.json();
     const parsed = forgotPasswordSchema.safeParse(body);
 
@@ -26,7 +31,7 @@ export async function POST(req: NextRequest) {
       });
 
       const token = crypto.randomBytes(32).toString("hex");
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+      const expiresAt = new Date(Date.now() + TOKEN_EXPIRY_MS);
 
       await db.token.create({
         data: {

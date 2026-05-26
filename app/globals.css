@@ -2,13 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --surface-primary: #0f172a;
+  --surface-card: #111827;
+  --surface-border: #1f2937;
+  --texts-body: #f9fafb;
+  --texts-muted: #9ca3af;
+  --texts-heading: #f9fafb;
+  --brand-primary: #2563eb;
+  --brand-primary-hover: #1d4ed8;
+  --text-link: #2563eb;
+  --surface-foreground-1: #1f2937;
+  --surface-foreground-2: #374151;
+  --radius-small: 0.375rem;
+  --font-geist-sans: var(--font-inter), system-ui, sans-serif;
+}
+
 body {
   color: var(--texts-body);
   background-color: var(--surface-primary);
-  font-family: var(--font-geist-sans), sans-serif;
+  font-family: var(--font-geist-sans);
 }
 
-/* Custom scrollbars matching the dark theme */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -25,4 +40,28 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--surface-foreground-2);
+}
+
+@layer utilities {
+  .bg-page {
+    background-color: var(--surface-primary);
+  }
+  .bg-card {
+    background-color: var(--surface-card);
+  }
+  .border-default {
+    border-color: var(--surface-border);
+  }
+  .text-heading {
+    color: var(--texts-heading);
+  }
+  .text-muted {
+    color: var(--texts-muted);
+  }
+  .text-link {
+    color: var(--text-link);
+  }
+  .border-brand-primary {
+    border-color: var(--brand-primary);
+  }
 }

@@ -5,6 +5,23 @@ const attempts = new Map<string, { count: number; resetAt: number }>();
 const LIMIT = 5;
 const WINDOW_MS = 10 * 60 * 1000;
 
+function inMemoryRateLimit(identifier: string): { success: boolean; remaining: number } {
+  const now = Date.now();
+  const record = attempts.get(identifier);
+
+  if (!record || now > record.resetAt) {
+    attempts.set(identifier, { count: 1, resetAt: now + WINDOW_MS });
+    return { success: true, remaining: LIMIT - 1 };
+  }
+
+  if (record.count >= LIMIT) {
+    return { success: false, remaining: 0 };
+  }
+
+  record.count++;
+  return { success: true, remaining: LIMIT - record.count };
+}
+
 export async function rateLimit(identifier: string): Promise<{
   success: boolean;
   remaining: number;
@@ -25,23 +42,10 @@ export async function rateLimit(identifier: string): Promise<{
         remaining: result.remaining,
       };
     } catch (e) {
-      console.error("[rate-limit] Upstash Redis error, falling back to in-memory:", e);
-      return { success: true, remaining: LIMIT };
+      console.error("[rate-limit] Upstash Redis error, using in-memory fallback:", e);
+      return inMemoryRateLimit(identifier);
     }
   }
 
-  const now = Date.now();
-  const record = attempts.get(identifier);
-
-  if (!record || now > record.resetAt) {
-    attempts.set(identifier, { count: 1, resetAt: now + WINDOW_MS });
-    return { success: true, remaining: LIMIT - 1 };
-  }
-
-  if (record.count >= LIMIT) {
-    return { success: false, remaining: 0 };
-  }
-
-  record.count++;
-  return { success: true, remaining: LIMIT - record.count };
+  return inMemoryRateLimit(identifier);
 }

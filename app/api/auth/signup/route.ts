@@ -4,9 +4,14 @@ import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { signupSchema } from "@/lib/validations";
 import { sendVerificationEmail } from "@/lib/email";
+import { enforceRateLimit } from "@/lib/api-rate-limit";
+import { BCRYPT_ROUNDS, TOKEN_EXPIRY_MS } from "@/lib/constants";
 
 export async function POST(req: NextRequest) {
   try {
+    const rateLimited = await enforceRateLimit(req, "signup");
+    if (rateLimited) return rateLimited;
+
     const body = await req.json();
     const parsed = signupSchema.safeParse(body);
 
@@ -24,19 +29,19 @@ export async function POST(req: NextRequest) {
     const existing = await db.user.findUnique({ where: { email } });
     if (existing) {
       return NextResponse.json(
-        { error: "Invalid credentials" },
+        { error: "Unable to create an account with this email." },
         { status: 400 }
       );
     }
 
-    const hashedPassword = await bcrypt.hash(password, 12);
+    const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
     const user = await db.user.create({
       data: { email, password: hashedPassword },
     });
 
     const token = crypto.randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + TOKEN_EXPIRY_MS);
 
     await db.token.create({
       data: {

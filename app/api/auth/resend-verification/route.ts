@@ -3,6 +3,8 @@ import crypto from "crypto";
 import { db } from "@/lib/db";
 import { forgotPasswordSchema } from "@/lib/validations";
 import { sendVerificationEmail } from "@/lib/email";
+import { enforceRateLimit } from "@/lib/api-rate-limit";
+import { TOKEN_EXPIRY_MS } from "@/lib/constants";
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,6 +20,16 @@ export async function POST(req: NextRequest) {
 
     const { email } = parsed.data;
 
+    const rateLimited = await enforceRateLimit(req, "resend-verification");
+    if (rateLimited) return rateLimited;
+
+    const emailRateLimited = await enforceRateLimit(
+      req,
+      "resend-verification-email",
+      email
+    );
+    if (emailRateLimited) return emailRateLimited;
+
     const user = await db.user.findUnique({ where: { email } });
 
     if (user && !user.emailVerified) {
@@ -26,7 +38,7 @@ export async function POST(req: NextRequest) {
       });
 
       const token = crypto.randomBytes(32).toString("hex");
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+      const expiresAt = new Date(Date.now() + TOKEN_EXPIRY_MS);
 
       await db.token.create({
         data: {
@@ -41,10 +53,6 @@ export async function POST(req: NextRequest) {
         await sendVerificationEmail(email, token);
       } catch (e) {
         console.error("[resend-verification] Failed to send email:", e);
-        return NextResponse.json(
-          { error: "Could not send verification email. Check Resend settings and try again." },
-          { status: 500 }
-        );
       }
     }
 

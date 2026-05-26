@@ -5,11 +5,13 @@ import bcrypt from "bcryptjs";
 import { db } from "./db";
 import { loginSchema } from "./validations";
 import { rateLimit } from "./rate-limit";
+import { getClientIp } from "./request-ip";
 
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(db),
   session: {
     strategy: "jwt",
+    maxAge: 30 * 24 * 60 * 60,
   },
   pages: {
     signIn: "/auth/login",
@@ -28,15 +30,14 @@ export const authOptions: NextAuthOptions = {
 
         const { email, password } = parsed.data;
 
-        const ip =
-          req?.headers?.["x-forwarded-for"]?.toString().split(",")[0]?.trim() ??
-          req?.headers?.["x-real-ip"]?.toString() ??
-          "unknown";
-
+        const ip = req?.headers ? getClientIp({ headers: req.headers }) : "unknown";
         const { success: withinLimit } = await rateLimit(`login:${ip}`);
         if (!withinLimit) return null;
 
-        const user = await db.user.findUnique({ where: { email } });
+        const user = await db.user.findUnique({
+          where: { email },
+          select: { id: true, email: true, password: true, emailVerified: true },
+        });
         if (!user) return null;
 
         const isValid = await bcrypt.compare(password, user.password);
@@ -53,11 +54,20 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
       if (user) {
         token.id = user.id;
         token.emailVerified = true;
       }
+
+      if (trigger === "update" && token.id) {
+        const dbUser = await db.user.findUnique({
+          where: { id: token.id as string },
+          select: { emailVerified: true },
+        });
+        token.emailVerified = !!dbUser?.emailVerified;
+      }
+
       return token;
     },
     async session({ session, token }) {

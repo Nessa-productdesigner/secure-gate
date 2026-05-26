@@ -16,21 +16,31 @@ export function ForgotPasswordForm() {
     setIsLoading(true);
     setError("");
 
-    const res = await fetch("/api/auth/forgot-password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
-    });
+    try {
+      const res = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+      });
 
-    const data = await res.json();
-    setIsLoading(false);
+      const data = await res.json();
 
-    if (!res.ok) {
-      setError(data.error);
-      return;
+      if (res.status === 429) {
+        setError("Too many attempts. Please wait a few minutes and try again.");
+        return;
+      }
+
+      if (!res.ok) {
+        setError(data.error ?? "Unable to process your request. Please try again.");
+        return;
+      }
+
+      setSent(true);
+    } catch {
+      setError("Unable to connect. Please check your network and try again.");
+    } finally {
+      setIsLoading(false);
     }
-
-    setSent(true);
   }
 
   if (sent) {
@@ -43,12 +53,14 @@ export function ForgotPasswordForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
       {error && <Alert type="error" message={error} />}
 
       <Input
         label="Email"
         type="email"
+        name="email"
+        autoComplete="email"
         placeholder="you@example.com"
         value={email}
         onChange={(e) => setEmail(e.target.value)}

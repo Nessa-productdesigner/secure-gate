@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { verifyEmailSchema } from "@/lib/validations";
+import { enforceRateLimit } from "@/lib/api-rate-limit";
 
 export async function POST(req: NextRequest) {
   try {
+    const rateLimited = await enforceRateLimit(req, "verify-email");
+    if (rateLimited) return rateLimited;
+
     const body = await req.json();
     const parsed = verifyEmailSchema.safeParse(body);
 

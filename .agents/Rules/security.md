@@ -199,8 +199,9 @@ Middleware is responsible for:
 - authentication redirects
 - email verification enforcement
 - protected route gating
-- rate limiting integration
 - auth boundary enforcement
+
+Rate limiting runs in API routes and `lib/auth.ts` (login), not in middleware.
 
 Protected routes must NEVER rely solely on client-side checks.
 
@@ -220,50 +221,48 @@ Recommended protected routes:
 
 # Token Security
 
-## VerificationToken Model
+## App Token Model (`Token`)
 
-Verification tokens must:
-- belong to a specific user
-- expire after 15 minutes
-- be cryptographically random
-- be single-purpose
+Email verification and password reset share one `Token` model with a `TokenType` enum.
 
-Recommended schema:
+Requirements:
+- belong to a specific user (`userId`, `onDelete: Cascade`)
+- expire after **1 hour** (`TOKEN_EXPIRY_MS` in `lib/constants.ts`)
+- be cryptographically random (64-char hex)
+- be deleted from the database on successful use (no reuse)
+
 ```prisma
-model VerificationToken {
-  id         String   @id @default(cuid())
-  identifier String
-  token      String   @unique
-  expires    DateTime
+model Token {
+  id        String    @id @default(cuid())
+  token     String    @unique
+  type      TokenType
+  expiresAt DateTime
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
 
-  userId     String
-  user       User @relation(fields: [userId], references: [id])
+  @@index([userId, type])
+  @@index([expiresAt])
+}
 
-  createdAt  DateTime @default(now())
+enum TokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
 }
 ```
+
+Email links use path segments (not query strings):
+- `/auth/verify-email/confirm/[token]`
+- `/auth/reset-password/[token]`
+
+Legacy `?token=` URLs redirect to the confirm path.
 
 ---
 
-## PasswordResetToken Model
+## NextAuth `VerificationToken`
 
-Password reset tokens must:
-- remain unique
-- expire after 1 hour
-- never be reusable
-- remain isolated from verification logic
-
-Recommended schema:
-```prisma
-model PasswordResetToken {
-  id         String   @id @default(cuid())
-  email      String
-  token      String   @unique
-  expires    DateTime
-
-  createdAt  DateTime @default(now())
-}
-```
+The Prisma adapter includes a separate `VerificationToken` model for NextAuth internals.
+Do not use it for app email verification or password reset flows.
 
 ---
 
@@ -324,7 +323,7 @@ Password reset emails must:
 
 Reset route:
 ```txt
-/reset-password/[token]
+/auth/reset-password/[token]
 ```
 
 Correct response:
@@ -339,20 +338,15 @@ Email not found
 
 ---
 
-# Email Template Standards
+# Email Standards
 
-React Email templates must:
-- remain minimal
-- render correctly across email clients
-- avoid heavy styling complexity
-- clearly communicate actions
-- include expiration messaging
-- use accessible text contrast
+Transactional email HTML lives in `lib/email.ts` (Resend + inline HTML).
 
-Emails should remain:
-- concise,
-- readable,
-- and trustworthy.
+Emails must:
+- remain minimal and readable across clients
+- include expiration messaging (1 hour)
+- use HTTPS links to path-based token routes
+- never embed secrets beyond the one-time token in the link path
 
 ---
 
@@ -393,9 +387,14 @@ Never access the database before validation.
 ## Login Protection
 
 Rate limiting must be applied to:
-- login endpoint
-- forgot-password endpoint
-- verification resend endpoint (if implemented)
+- login (`authorize` in `lib/auth.ts`)
+- signup (`/api/auth/signup`)
+- forgot-password (`/api/auth/forgot-password`)
+- reset-password (`/api/auth/reset-password`)
+- verify (`/api/auth/verify`)
+- resend-verification (`/api/auth/resend-verification`)
+
+Implementation: `lib/api-rate-limit.ts` + `lib/rate-limit.ts` (Upstash when configured; in-memory fallback per instance, including on Redis errors).
 
 Recommended policy:
 ```txt
@@ -468,12 +467,12 @@ The User model must include:
 
 ```prisma
 model User {
-  id                    String   @id @default(cuid())
-  name                  String?
-  email                 String   @unique
-  password              String
-  emailVerified         Boolean  @default(false)
-  createdAt             DateTime @default(now())
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 ```
 
@@ -683,8 +682,7 @@ Before deployment confirm:
 
 - [ ] Passwords are hashed with bcryptjs
 - [ ] Tokens use crypto.randomBytes
-- [ ] Verification tokens expire after 15 minutes
-- [ ] Reset tokens expire after 1 hour
+- [ ] All app tokens expire after 1 hour and are deleted on use
 - [ ] JWT sessions are configured securely
 - [ ] No secrets are hardcoded
 - [ ] No sensitive logs exist

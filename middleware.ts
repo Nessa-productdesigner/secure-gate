@@ -22,6 +22,10 @@ export default withAuth(
       }
     }
 
+    if (pathname.startsWith("/auth/verify-email") && token?.emailVerified) {
+      return NextResponse.redirect(new URL("/dashboard", req.url));
+    }
+
     return NextResponse.next();
   },
   {
@@ -40,5 +44,12 @@ export default withAuth(
 );
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/auth/login", "/auth/signup"],
+  matcher: [
+    "/dashboard",
+    "/dashboard/:path*",
+    "/auth/login",
+    "/auth/signup",
+    "/auth/verify-email",
+    "/auth/verify-email/:path*",
+  ],
 };

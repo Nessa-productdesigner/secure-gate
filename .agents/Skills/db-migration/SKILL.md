@@ -107,12 +107,12 @@ Example:
 
 ```prisma
 model User {
-  id                String   @id @default(cuid())
-  name              String?
-  email             String   @unique
-  password          String
-  emailVerified     Boolean  @default(false)
-  createdAt         DateTime @default(now())
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 ```
 
@@ -136,8 +136,9 @@ Examples:
 
 ```prisma
 model User
-model VerificationToken
-model PasswordResetToken
+model Token
+model Account
+model Session
 ```
 
 ---
@@ -150,15 +151,15 @@ The User model must include:
 
 ```prisma
 model User {
-  id                    String                 @id @default(cuid())
-  name                  String?
-  email                 String                 @unique
-  password              String
-  emailVerified         Boolean                @default(false)
-  createdAt             DateTime               @default(now())
-
-  verificationTokens    VerificationToken[]
-  passwordResetTokens   PasswordResetToken[]
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  tokens        Token[]
+  accounts      Account[]
+  sessions      Session[]
 }
 ```
 
@@ -173,60 +174,36 @@ Passwords must NEVER be stored in plaintext.
 
 ---
 
-# VerificationToken Model
+# Token Model (app auth tokens)
 
-Verification tokens are used for:
-- email confirmation
-- account activation
-
-Requirements:
-- cryptographically random token
-- 15-minute expiry
-- user association
-- unique token constraint
-
-Recommended schema:
+Single model for email verification and password reset:
 
 ```prisma
-model VerificationToken {
-  id         String   @id @default(cuid())
-  identifier String
-  token      String   @unique
-  expires    DateTime
+model Token {
+  id        String    @id @default(cuid())
+  token     String    @unique
+  type      TokenType
+  expiresAt DateTime
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
 
-  userId     String
-  user       User @relation(fields: [userId], references: [id])
+  @@index([userId, type])
+  @@index([expiresAt])
+}
 
-  createdAt  DateTime @default(now())
+enum TokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
 }
 ```
 
----
-
-# PasswordResetToken Model
-
-Password reset tokens are used for:
-- secure password recovery
-- password reset verification
-
 Requirements:
-- unique token
-- 1-hour expiry
-- single-use behavior
-- secure lookup behavior
+- 1-hour expiry (`TOKEN_EXPIRY_MS`)
+- delete row on successful use
+- `onDelete: Cascade` from User
 
-Recommended schema:
-
-```prisma
-model PasswordResetToken {
-  id         String   @id @default(cuid())
-  email      String
-  token      String   @unique
-  expires    DateTime
-
-  createdAt  DateTime @default(now())
-}
-```
+NextAuth adapter tables (`Account`, `Session`, adapter `VerificationToken`) are separate — do not repurpose them for app flows.
 
 ---
 
@@ -317,12 +294,7 @@ Never use:
 
 ## Token Expiration Rules
 
-Verification tokens:
-```txt
-15 minutes
-```
-
-Password reset tokens:
+All app `Token` rows (both types):
 ```txt
 1 hour
 ```
@@ -571,8 +543,7 @@ Before finalizing any migration confirm:
 - [ ] Relations are valid
 - [ ] Unique constraints are correct
 - [ ] Passwords remain hashed
-- [ ] Verification tokens expire after 15 minutes
-- [ ] Reset tokens expire after 1 hour
+- [ ] App tokens expire after 1 hour and cascade-delete with User
 - [ ] No plaintext secrets exist
 - [ ] Indexes support auth lookups
 - [ ] Naming remains consistent

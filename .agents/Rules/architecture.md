@@ -275,13 +275,10 @@ Redirect to /dashboard
 
 ```
 User clicks link in verification email
-  ├── Link: /auth/verify-email?token=<token> (email deep link only)
+  ├── Link: /auth/verify-email/confirm/<token>
   │
   ▼
-verify-email-client reads token, router.replace() strips query from URL
-  │
-  ▼
-POST /api/auth/verify with { token } in JSON body (not in URL)
+confirm page POSTs /api/auth/verify with { token } in JSON body
   │
   ▼
 Look up token in DB where type = EMAIL_VERIFICATION
@@ -327,13 +324,13 @@ Send reset email via Resend
   ▼
 Return success message regardless of outcome
 
-User opens reset link: /auth/reset-password?token=<token>
+User opens reset link: /auth/reset-password/<token>
   │
   ▼
-Form reads token from query once, submits via POST /api/auth/reset-password
+ResetPasswordForm submits POST /api/auth/reset-password
   with { token, password } in JSON body
   │
-  ├── Missing token in URL → show invalid link error (no API call)
+  ├── Missing or invalid token in path → show invalid link error (no API call)
   │
   ▼
 Validate token (exists, not expired, type = PASSWORD_RESET)
@@ -382,10 +379,10 @@ used for the credentials-only flow.
 | Session cookies | HttpOnly, Secure, SameSite via NextAuth |
 | CSRF protection | Enabled by default on NextAuth routes — do not disable |
 | Custom API routes | JSON POST bodies; tokens sent in body after page load where possible |
-| Tokens in URLs | Email links use `?token=` for one-time navigation; verify flow strips query immediately; prefer POST body for API calls |
-| Brute force | Rate limiting on login only (`authorize` in `lib/auth.ts`), 5 attempts / 10 min per IP |
-| Rate limit backend | Upstash Redis when env vars set; in-memory fallback per instance in dev |
-| Upstash outage | If Redis client throws, logs server-side and allows the request (`success: true`); without Upstash env vars, uses in-memory limiter per instance |
+| Tokens in URLs | Email links use path segments; legacy `?token=` redirects to confirm path; APIs use JSON bodies |
+| Brute force | Rate limiting on login, signup, forgot/reset/verify/resend routes; 5 attempts / 10 min per IP (scoped keys) |
+| Rate limit backend | Upstash Redis when both env vars set; otherwise in-memory per instance |
+| Upstash outage | Redis errors log server-side and fall back to in-memory limiter (not fail-open) |
 | Error leakage | Generic messages on all auth errors — no internal details exposed |
 | Email enumeration | Forgot password returns same response whether email exists or not |
 | Env secrets | Validated at startup via `lib/env.ts` — missing vars throw, no silent failure |
