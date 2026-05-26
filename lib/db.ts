@@ -4,6 +4,7 @@ import { Pool } from "pg";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
+  prismaConnectionString: string | undefined;
 };
 
 /**
@@ -37,13 +38,30 @@ function resolveConnectionString(): string {
   return url;
 }
 
-function createPrismaClient(): PrismaClient {
-  const connectionString = resolveConnectionString();
+function createPrismaClient(connectionString: string): PrismaClient {
   const pool = new Pool({ connectionString });
   const adapter = new PrismaPg(pool);
   return new PrismaClient({ adapter });
 }
 
-export const db = globalForPrisma.prisma ?? createPrismaClient();
+function getPrismaClient(): PrismaClient {
+  const connectionString = resolveConnectionString();
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = db;
+  if (
+    process.env.NODE_ENV !== "production" &&
+    globalForPrisma.prisma &&
+    globalForPrisma.prismaConnectionString !== connectionString
+  ) {
+    void globalForPrisma.prisma.$disconnect();
+    globalForPrisma.prisma = undefined;
+  }
+
+  if (!globalForPrisma.prisma) {
+    globalForPrisma.prisma = createPrismaClient(connectionString);
+    globalForPrisma.prismaConnectionString = connectionString;
+  }
+
+  return globalForPrisma.prisma;
+}
+
+export const db = getPrismaClient();

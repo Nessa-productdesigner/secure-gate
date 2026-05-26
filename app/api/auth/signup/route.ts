@@ -47,17 +47,24 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    let emailSent = false;
     try {
       await sendVerificationEmail(email, token);
+      emailSent = true;
     } catch (e) {
       console.error("[signup] Failed to send verification email:", e);
     }
 
     return NextResponse.json(
-      { success: true, message: "Account created successfully" },
+      {
+        success: true,
+        message: "Account created successfully",
+        emailSent,
+      },
       { status: 201 }
     );
-  } catch {
+  } catch (error) {
+    console.error("[signup]", error);
     return NextResponse.json(
       { error: "Something went wrong" },
       { status: 500 }

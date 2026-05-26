@@ -38,7 +38,16 @@ export function SignupForm() {
       return;
     }
 
-    router.push("/auth/verify-email");
+    if (data.emailSent === false) {
+      setError(
+        "Account created, but we could not send the verification email. Add a real Resend API key in .env.local, restart the app, and sign up again—or ask your developer to resend."
+      );
+      return;
+    }
+
+    router.push(
+      `/auth/verify-email?email=${encodeURIComponent(fields.email)}`
+    );
   }
 
   return (

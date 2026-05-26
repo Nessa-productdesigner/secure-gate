@@ -2,25 +2,17 @@
 trigger: always_on
 ---
 
-# code-style.md
-
 # SecureGate Engineering & Code Style Standards
 
-This document defines the engineering standards, architectural discipline,
-code organization rules, naming conventions, backend structure,
-and implementation philosophy for SecureGate.
+This document defines engineering standards, code organization, naming conventions,
+and implementation style for SecureGate.
 
-SecureGate is a production-grade authentication system.
+**Canonical security policy** (error shapes, token rules, route protection, env vars)
+lives in `AGENTS.md` at the repo root. **System structure and flows** live in
+`.agents/Rules/architecture.md`. This file must stay aligned with both.
 
-The codebase should communicate:
-- engineering maturity,
-- security awareness,
-- maintainability,
-- and operational discipline.
-
-This is NOT a tutorial project.
-
-Every implementation decision should feel intentional.
+SecureGate is a production-grade authentication system. The codebase should communicate
+engineering maturity, security awareness, maintainability, and operational discipline.
 
 ---
 
@@ -28,72 +20,31 @@ Every implementation decision should feel intentional.
 
 ## 1. Clarity Over Cleverness
 
-Code should prioritize:
-- readability,
-- predictability,
-- maintainability,
-- and explicitness.
+Code should prioritize readability, predictability, maintainability, and explicitness.
 
-Avoid:
-- unnecessary abstraction
-- over-engineering
-- magic behavior
-- hidden side effects
-- overly clever code
-
-Future maintainers should understand the system quickly.
-
----
+Avoid: unnecessary abstraction, over-engineering, magic behavior, hidden side effects,
+overly clever code.
 
 ## 2. Security First
 
-Authentication systems are security-critical infrastructure.
-
-All code must prioritize:
-- safe defaults,
-- non-leaking behavior,
-- defensive validation,
-- and explicit boundaries.
-
-Never optimize away security clarity.
-
----
+Authentication systems are security-critical. Prioritize safe defaults, non-leaking
+behavior, defensive validation, and explicit boundaries.
 
 ## 3. Consistency Matters
 
-Consistent systems are:
-- easier to debug,
-- easier to scale,
-- easier to audit,
-- and safer to maintain.
-
-SecureGate should feel unified across:
-- API routes,
-- database access,
-- middleware,
-- validation,
-- UI logic,
-- and error handling.
+SecureGate should feel unified across API routes, `lib/`, middleware, validation,
+UI, and error handling.
 
 ---
 
-# Repository Workflow
+# Repository Workflow (bootstrap only)
 
-Before implementing authentication features:
+Use when creating a **new** clone from scratch—not for every feature:
 
 1. Complete initial scaffold
-2. Initialize Prisma
-3. Confirm PostgreSQL connectivity
-4. Run initial migration
-5. Push clean scaffold commit to GitHub
-
-This establishes:
-- incremental engineering discipline
-- rollback safety
-- clean project history
-- reproducible setup state
-
-Recommended first commit:
+2. Initialize Prisma and confirm PostgreSQL connectivity
+3. Run initial migration / `db push`
+4. Push a clean scaffold commit to GitHub
 
 ```bash
 git commit -m "chore: initial securegate scaffold"
@@ -103,49 +54,44 @@ git commit -m "chore: initial securegate scaffold"
 
 # Project Structure Standards
 
-Recommended structure:
+Current layout (do not add dynamic `[token]` page segments; tokens use query params
+on auth pages and JSON bodies on API routes):
 
 ```txt
 /app
   /auth
-    /login
-    /signup
-    /forgot-password
-    /reset-password
-    /verify-email
-
-  /verify-email/[token]
-  /reset-password/[token]
-
-  /api
-    /auth
-      /signup
-      /forgot-password
-      /reset-password
-      /verify-email
-      /[...nextauth]
+    /login/page.tsx
+    /signup/page.tsx
+    /forgot-password/page.tsx
+    /reset-password/page.tsx      — reads ?token= from email link
+    /verify-email/page.tsx        — client strips ?token= after load
+  /dashboard/page.tsx
+  /api/auth
+    signup/route.ts
+    verify/route.ts
+    forgot-password/route.ts
+    reset-password/route.ts
+    [...nextauth]/route.ts
 
 /components
-  /ui
-  /forms
-  /email
+  /ui                             — Button, Input, Alert, Spinner, PasswordStrength
+  /forms                          — LoginForm, SignupForm, etc.
 
 /lib
   auth.ts
   db.ts
-  email.ts
+  email.ts                        — Resend + inline HTML email bodies
+  env.ts                          — Zod-validated env (throws at startup)
   rate-limit.ts
   validations.ts
 
-/prisma
-  schema.prisma
+/middleware.ts
+/prisma/schema.prisma
 ```
 
 ---
 
 # Naming Conventions
-
-## General Naming Rules
 
 | Type | Convention |
 |---|---|
@@ -156,22 +102,18 @@ Recommended structure:
 | Constants | UPPER_SNAKE_CASE |
 | Prisma Models | PascalCase |
 
----
-
 ## Route Naming
 
-Routes should remain:
-- explicit,
-- predictable,
-- and resource-oriented.
+Routes should be explicit, predictable, and resource-oriented.
 
 Correct:
 
 ```txt
 /api/auth/signup
+/api/auth/verify
 /api/auth/forgot-password
 /api/auth/reset-password
-/api/auth/verify-email
+/api/auth/[...nextauth]
 ```
 
 Avoid:
@@ -180,145 +122,100 @@ Avoid:
 /api/create-user
 /api/reset
 /api/helper
+/api/auth/verify-email
 ```
 
 ---
 
 # File Responsibility Rules
 
-Each file should have:
-- a single clear responsibility,
-- predictable behavior,
-- and limited scope.
+Each file should have a single clear responsibility and limited scope.
 
-Avoid:
-- giant utility files
-- mixed responsibilities
-- unrelated logic in shared modules
+Avoid: giant utility files, mixed responsibilities, unrelated logic in shared modules.
+
+Database access: import `db` from `@/lib/db.ts` in API routes and `lib/auth.ts`.
+Do not import `@prisma/client` from pages or components.
 
 ---
 
 # Component Standards
 
-## UI Components
+## UI Components — `/components/ui`
 
-Reusable UI components belong in:
+Stateless, reusable primitives: Button, Input, Alert, Spinner, PasswordStrength.
 
-```txt
-/components/ui
-```
+`Input` must wire `label` + `htmlFor` + `id` (and `aria-invalid` / `aria-describedby`
+when showing field errors).
 
-Examples:
-- Button
-- Input
-- Alert
-- Spinner
+## Form Components — `/components/forms`
 
----
+Auth-specific forms own local state, submission, loading, and client-side UX validation.
+Server-side validation is always authoritative (Zod in API routes / NextAuth).
 
-## Form Components
+Required UX (see also `AGENTS.md`):
 
-Auth-specific forms belong in:
+- Accessible labels on every field
+- Loading state and disabled submit during async requests
+- Password strength indicator (Weak / Fair / Strong) on password fields
 
-```txt
-/components/forms
-```
+## Email
 
-Examples:
-- LoginForm
-- SignupForm
-- ForgotPasswordForm
-
----
-
-## Email Templates
-
-React Email templates belong in:
-
-```txt
-/components/email
-```
-
-Examples:
-- VerifyEmailTemplate
-- ResetPasswordTemplate
+Email HTML and send helpers live in `lib/email.ts` (not `/components/email`).
 
 ---
 
 # API Route Standards
 
-API routes are backend security boundaries.
+API routes are security boundaries. Every route must:
 
-Every route must:
-1. validate input,
-2. sanitize data,
-3. execute business logic,
-4. handle failures safely,
-5. return predictable responses.
+1. Validate input with Zod
+2. Execute business logic (hashing, tokens, DB) only after validation
+3. Handle failures safely (`try/catch`, no stack traces to client)
+4. Return predictable JSON responses
 
----
+There is no separate “sanitize” step—normalization belongs in Zod schemas
+(e.g. `.trim().toLowerCase()` on email) where needed.
 
-## Validation-first Architecture
+## Validation-first
 
-Always validate before:
-- database access
-- token generation
-- hashing
-- authentication checks
-
+Always validate before: database access, token generation, hashing, auth checks.
 Never trust client-side validation alone.
-
-Use:
-```txt
-Zod
-```
-
-for ALL external input.
-
----
 
 ## Response Standards
 
-Success response example:
+Success:
 
 ```ts
-{
-  success: true,
-  message: "Account created successfully"
-}
+{ success: true, message: "Account created successfully" }
 ```
 
-Error response example:
+Error:
 
 ```ts
-{
-  error: "Invalid credentials"
-}
+{ error: "Invalid credentials", field?: "email" }
 ```
 
----
+- **400** — Zod / token / field errors: specific, actionable `error`; optional `field`
+- **401** — NextAuth credential failures: generic only (via `authorize` returning `null`)
+- **500** — Unexpected server errors: generic client message only, e.g. `"Something went wrong"`; log details server-side only
+
+Field-level Zod messages on 400 are allowed. Auth paths must not distinguish
+“user not found” vs “wrong password” vs “unverified email.”
 
 ## Error Message Rules
 
-Error messages must NEVER reveal:
-- whether an email exists
-- whether a password is incorrect
-- internal Prisma errors
-- stack traces
-- implementation details
+Never reveal in client-facing auth responses:
 
-Correct:
+- whether an email exists (except forgot-password, which always returns success)
+- whether a password was wrong
+- Prisma errors, stack traces, or implementation details
 
-```txt
-Invalid credentials
-```
+Correct (login): `Invalid credentials` (or NextAuth generic failure).
 
-Incorrect:
+Incorrect: `User not found`, `Wrong password`, `Please verify your email`.
 
-```txt
-User not found
-Wrong password
-```
+Token endpoints may return specific token errors (expired / invalid) with a prompt
+to re-request—see `AGENTS.md`.
 
 ---
 
@@ -326,40 +223,22 @@ Wrong password
 
 ## Session Strategy
 
-SecureGate uses:
-```txt
-JWT sessions via NextAuth
-```
+JWT sessions via NextAuth (`session.strategy: "jwt"` in `lib/auth.ts`).
 
-Reasons:
-- stateless authentication
-- simpler deployment
-- fewer database reads
-- better serverless compatibility
-- lower operational complexity
-
----
+Prisma adapter tables exist for NextAuth compatibility; credentials login does not
+use database-backed sessions.
 
 ## Middleware Enforcement
 
-Middleware is responsible for:
-- route protection
-- auth redirects
-- verification enforcement
-- protected route access
-- rate limit integration
+`middleware.ts` is responsible for **route protection only**:
 
-Protected routes must NEVER rely solely on client-side checks.
+- `/dashboard/*` — require session; redirect unverified users to `/auth/verify-email`
+- `/auth/login`, `/auth/signup` — redirect verified users to `/dashboard`
 
----
+**Rate limiting** runs in `lib/auth.ts` inside CredentialsProvider `authorize()`
+(5 attempts / 10 minutes per IP), not in middleware.
 
-## Protected Route Rules
-
-Protected routes require:
-- authenticated session
-- verified email
-
-Route behavior:
+Protected routes must never rely solely on client-side checks.
 
 | State | Action |
 |---|---|
@@ -367,274 +246,115 @@ Route behavior:
 | Unverified | Redirect to verification notice |
 | Verified | Allow access |
 
+## Tokens in URLs
+
+Email links may use `?token=` for one-time navigation. Mitigations:
+
+- Verification: client calls `router.replace()` to strip the query, then `POST`s token in JSON body
+- Reset: token read from query once, submitted in `POST` body to `/api/auth/reset-password`
+- Prefer tokens in request bodies for API calls; avoid logging query strings
+
 ---
 
 # Password Security Standards
 
-Passwords must:
-- remain server-side only
-- never appear in logs
-- never be returned in responses
-- always be hashed
-
-Required hashing:
+Passwords must remain server-side only, never appear in logs or responses, and
+always be hashed:
 
 ```ts
-bcrypt.hash(password, 12)
+await bcrypt.hash(password, 12)
 ```
 
 ---
 
 # Token Standards
 
-## Verification Tokens
+| Type | Expiry | Reuse |
+|---|---|---|
+| EMAIL_VERIFICATION | 1 hour | Delete from DB on successful verify |
+| PASSWORD_RESET | 1 hour | Delete from DB on successful reset (single-use) |
 
-Purpose:
-- email verification
-
-Rules:
-- cryptographically random
-- expire after 15 minutes
-- single-purpose
-
----
-
-## Password Reset Tokens
-
-Purpose:
-- password recovery
-
-Rules:
-- cryptographically random
-- expire after 1 hour
-- single-use only
-
----
-
-## Token Generation
-
-Use:
+Generation:
 
 ```ts
 crypto.randomBytes(32).toString("hex")
 ```
 
-Never use:
-- timestamps
-- predictable IDs
-- sequential values
+Never use: `Math.random`, timestamps, predictable IDs, or sequential values.
+
+Store expiry as `expiresAt` in the `Token` model. Email copy must match the real TTL.
 
 ---
 
 # Prisma Standards
 
-## Database Access
-
-Prisma access should remain:
-- server-side only
-- centralized
-- predictable
-
-Use singleton Prisma pattern.
-
----
-
-## Query Safety
-
-Always:
-- validate input first
-- select only needed fields
-- avoid overfetching
-
-Good:
-
-```ts
-select: {
-  id: true,
-  email: true
-}
-```
-
-Avoid:
-
-```ts
-select: {
-  password: true
-}
-```
-
-unless necessary.
+- Server-side only, via `db` singleton in `lib/db.ts`
+- Validate input before queries
+- Prefer `select` / `omit` to avoid loading `password` when the hash is not needed
+- Only include `password` in queries when comparing or updating hashes
 
 ---
 
 # TypeScript Standards
 
-## Strict Typing
-
-Avoid:
-- `any`
-- weak typing
-- ambiguous return types
-
-Prefer:
-- explicit interfaces
-- typed responses
-- predictable contracts
-
----
-
-## Type Safety
-
-All:
-- API responses,
-- validation schemas,
-- Prisma interactions,
-- and component props
-
-should remain strongly typed.
+- `strict: true` — no `any` unless unavoidable and commented
+- Explicit types for API payloads, Zod schemas, and component props
+- Typed route handler responses where practical
 
 ---
 
 # Async Standards
 
-Async operations must:
-- use proper `try/catch`
-- handle failures gracefully
-- avoid unhandled promises
-
-Correct:
-
-```ts
-try {
-  // logic
-} catch (error) {
-  // safe handling
-}
-```
+Use `try/catch` in API routes; never leak unhandled rejections. In `catch` blocks
+for 500 responses, log server-side only and return a generic JSON error.
 
 ---
 
 # Logging Rules
 
-Allowed:
-- development debugging
-- operational logging
-- server-side diagnostics
+**Forbidden in logs:** passwords, tokens, secrets, session cookies, full reset/verify URLs.
 
-Forbidden:
-- passwords
-- tokens
-- secrets
-- session cookies
-
-Sensitive data must NEVER appear in logs.
+**Allowed:** operational errors, rate-limit backend failures (no token values).
 
 ---
 
 # Environment Variable Standards
 
-Sensitive values belong ONLY in:
-```txt
-.env.local
-```
+- Local secrets in `.env.local` only — never commit
+- Required vars validated at startup in `lib/env.ts` (throws if missing/invalid)
+- Never expose server secrets via `NEXT_PUBLIC_*`
 
-Examples:
-- DATABASE_URL
-- NEXTAUTH_SECRET
-- RESEND_API_KEY
-
-Never:
-- hardcode secrets
-- commit secrets
-- expose private env variables to the client
+See `AGENTS.md` for the full env list.
 
 ---
 
 # Frontend Standards
 
-## Client Components
-
-Use client components ONLY when needed.
-
-Examples:
-- form interaction
-- local state
-- event handling
-
-Prefer server components by default.
-
----
-
-## Form UX
-
-Every form must include:
-- labels
-- loading states
-- validation feedback
-- accessible inputs
-- disabled submit during async requests
+- Default to React Server Components; use `"use client"` only for forms, hooks, and browser APIs
+- Tailwind utility-first styling; prefer shared UI components over one-off patterns
+- Minimal inline styles (exception: dynamic widths e.g. password strength bar)
 
 ---
 
 # Accessibility Standards
 
-Required:
-- keyboard accessibility
-- visible focus states
-- semantic HTML
-- accessible labels
-- proper input associations
-
-Avoid inaccessible custom controls.
+- Keyboard accessible controls
+- Visible focus states (see `Input` focus ring)
+- Semantic HTML (`form`, `label`, `button`)
+- Labels associated with inputs via `htmlFor` / `id`
 
 ---
 
 # React Standards
 
-## Component Design
-
-Components should:
-- remain focused
-- avoid excessive props
-- stay composable
-- remain predictable
-
-Avoid:
-- giant multi-purpose components
-- duplicated auth logic
-
----
-
-# Styling Standards
-
-Use:
-```txt
-Tailwind CSS
-```
-
-Guidelines:
-- utility-first styling
-- consistent spacing
-- reusable patterns
-- minimal visual noise
-
-Avoid:
-- arbitrary inconsistent spacing
-- inline style clutter
-- deeply nested conditional styling
+Components stay focused, composable, and predictable. Do not duplicate auth logic
+across forms—keep credential checks in NextAuth / API routes.
 
 ---
 
 # Git Standards
 
-## Commit Discipline
-
-Commits should remain:
-- small,
-- descriptive,
-- and intentional.
-
-Good:
+Commits: small, descriptive, conventional prefixes.
 
 ```bash
 feat: implement forgot password flow
@@ -642,78 +362,46 @@ fix: protect dashboard middleware
 refactor: centralize zod validation
 ```
 
-Bad:
-
-```bash
-update stuff
-fix bugs
-changes
-```
+Avoid: `update stuff`, `fix bugs`, `changes`.
 
 ---
 
 # Security Testing Discipline
 
-Before deployment manually test:
+Before deployment, manually verify:
 
-- invalid login attempts
-- expired verification tokens
-- reused reset tokens
-- unauthorized route access
-- malformed requests
-- missing fields
-- rate limiting behavior
-
-Document:
-- expected behavior
-- actual behavior
-- mitigation applied
+- invalid login attempts and rate limiting (via NextAuth sign-in)
+- expired verification and reset tokens
+- reused reset tokens (must fail after consumption)
+- unauthorized `/dashboard` access
+- malformed / missing JSON bodies
+- forgot-password enumeration safety
 
 ---
 
 # Engineering Quality Checklist
 
-Before finalizing features verify:
-
-- [ ] Validation exists
-- [ ] Errors are non-revealing
-- [ ] Passwords are hashed
-- [ ] Tokens expire correctly
-- [ ] Protected routes use middleware
-- [ ] TypeScript typing is strict
-- [ ] Components are reusable
-- [ ] API responses are consistent
-- [ ] Environment variables are secure
-- [ ] No sensitive logs exist
-- [ ] Accessibility standards are met
-- [ ] Git history remains clean
-
----
-
-# Expected Code Quality
-
-SecureGate code should feel appropriate for:
-- production SaaS systems,
-- enterprise authentication platforms,
-- and security-focused engineering environments.
-
-The codebase should communicate:
-- intentional architecture,
-- operational maturity,
-- and engineering discipline.
+- [ ] Zod validation on all API inputs
+- [ ] Auth errors are generic; token errors are user-safe with re-request guidance
+- [ ] Passwords hashed with bcrypt (12 rounds)
+- [ ] Tokens: `crypto.randomBytes`, 1h expiry, deleted on use
+- [ ] `/dashboard` protected in middleware
+- [ ] Login rate limit in `lib/auth.ts` `authorize()`
+- [ ] `db` from `lib/db.ts` — no Prisma in pages/components
+- [ ] Env validated via `lib/env.ts`
+- [ ] No sensitive data in logs
+- [ ] Forms: labels, loading, password strength where applicable
+- [ ] Aligned with `AGENTS.md` and `architecture.md`
 
 ---
 
 # Final Engineering Principle
 
 When implementing SecureGate:
-- prioritize clarity over cleverness,
-- prioritize security over convenience,
-- prioritize maintainability over speed,
-- and prioritize consistency over shortcuts.
 
-The system should feel:
-- secure,
-- predictable,
-- scalable,
-- and production-ready.
+- clarity over cleverness
+- security over convenience
+- maintainability over speed
+- consistency over shortcuts
+
+The system should feel secure, predictable, and production-ready.

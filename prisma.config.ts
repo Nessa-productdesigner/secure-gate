@@ -9,6 +9,7 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    // CLI (db push, migrate) uses direct Supabase host; the app uses DATABASE_URL via lib/db.ts
+    url: process.env["DIRECT_URL"] ?? process.env["DATABASE_URL"],
   },
 });

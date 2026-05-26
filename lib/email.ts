@@ -3,6 +3,9 @@ import { env } from "./env";
 
 const resend = new Resend(env.RESEND_API_KEY);
 
+/** Resend test sender; with onboarding@resend.dev you can only send to your Resend account email until you verify a domain. */
+const FROM_EMAIL = env.RESEND_FROM_EMAIL ?? "SecureGate <onboarding@resend.dev>";
+
 export async function sendVerificationEmail(email: string, token: string) {
   const verificationUrl = `${env.NEXT_PUBLIC_APP_URL}/auth/verify-email?token=${token}`;
   
@@ -37,12 +40,16 @@ export async function sendVerificationEmail(email: string, token: string) {
     </div>
   `;
 
-  await resend.emails.send({
-    from: "SecureGate <noreply@securegate.app>",
+  const { error } = await resend.emails.send({
+    from: FROM_EMAIL,
     to: email,
     subject: "Verify your email address",
     html,
   });
+
+  if (error) {
+    throw new Error(error.message);
+  }
 }
 
 export async function sendPasswordResetEmail(email: string, token: string) {
@@ -79,10 +86,14 @@ export async function sendPasswordResetEmail(email: string, token: string) {
     </div>
   `;
 
-  await resend.emails.send({
-    from: "SecureGate <noreply@securegate.app>",
+  const { error } = await resend.emails.send({
+    from: FROM_EMAIL,
     to: email,
     subject: "Reset your password",
     html,
   });
+
+  if (error) {
+    throw new Error(error.message);
+  }
 }
